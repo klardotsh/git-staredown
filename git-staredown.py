@@ -3,10 +3,31 @@
 import argparse
 import enum
 import os
+import subprocess
 import sys
 
 import github3
 import pygit2
+from colorama import init as colorama_init
+from colorama import Fore
+
+MAX_USERNAME_LENGTH = 10
+SHORT_SHA_LENGTH = 7
+COLOR_MAPPINGS = {
+    'COLOR_SHA': Fore.RED,
+    'COLOR_REPO': Fore.GREEN,
+    'COLOR_AUTHOR': Fore.BLUE,
+    'COLOR_DEFAULT': Fore.RESET,
+    'COLOR_RESET': Fore.RESET,
+}
+
+ERR_NO_GH_CREDS = '''
+Please add GitHub username+password to Git config!
+$ git config --global staredown.githubusername myemail@somewhere.com
+$ git config --global staredown.githubpassword <API TOKEN>
+# OR
+$ git config --global staredown.githubpasswordcmd <COMMAND>
+'''.strip()
 
 
 # Rather than "Verbosity", because we'll default to being chatty
@@ -91,55 +112,68 @@ def all_commits_where_file_changed(repo, filename, cur_commit, commit_ids=None, 
     return commit_ids
 
 
-def format_discovered_pr(pull, quietness, prefix=None):
+def format_discovered_pr(repo_name, shas, pull, args):
     # TODO implement the other output levels
-    return '{prefix}#{num} @{user} {title}'.format(
-        prefix=prefix if prefix else '',
-        num=pull.number, user=pull.user, title=pull.title,
-    )
+    for sha in shas:
+        username = str(pull.user)
+
+        if len(username) > MAX_USERNAME_LENGTH:
+            username = '{}{}'.format(
+                username[:MAX_USERNAME_LENGTH - 1],
+                '…',
+            )
+
+        yield (
+            '{COLOR_SHA}{sha} {COLOR_REPO}{repo}#{num:<4d} '
+            '{COLOR_AUTHOR}@{user:10s}{COLOR_RESET} {title}'
+        ).format(
+            sha=sha[:SHORT_SHA_LENGTH], repo=repo_name, num=pull.number,
+            user=str(pull.user), title=pull.title,
+            **(COLOR_MAPPINGS if not args.nocolor else {x: '' for x in COLOR_MAPPINGS}),
+        )
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('filename', help='Relative path of file to track history of (ex. "README")')
-    # parser.add_argument(
-    #     '--follow', dest='follow', action='store_true',
-    #     help=(
-    #         'Follow file through its rename history. Defaults to value of '
-    #         '`git config log.follow`'
-    #     ),
-    # )
-    # parser.add_argument(
-    #     '--quiet', '-q', action='count', dest='quiet', default=0,
-    #     help='Ignored for now, will later control verbosity',
-    # )
     parser.add_argument(
         '--repo', '-r', dest='repo', default=os.getcwd(),
         help='Override path to repository (defaults to current working directory)',
+    )
+    parser.add_argument(
+        '--no-color', dest='nocolor', action='store_true',
+        help='Do not use colors (default if output is redirected)',
     )
 
     args = parser.parse_args()
     args.quiet = Quietness.ONE_LINE_SUMMARY
 
+    if not args.nocolor:
+        colorama_init(autoreset=True)
+
     repo = pygit2.Repository(args.repo)
 
-    # if not args.follow:
-    #     try:
-    #         args.follow = repo.config.get_bool('log.follow')
-    #     except KeyError:
-    #         args.follow = False
+    password = None
+    password_command = None
 
     try:
         username = repo.config['staredown.githubusername']
-        password = repo.config['staredown.githubpassword']
+        try:
+            password = repo.config['staredown.githubpassword']
+        except KeyError:
+            password_command = repo.config['staredown.githubpasswordcmd']
     except KeyError:
-        panic(
-            'Please add GitHub username+password to Git config!\n\n'
-            '$ git config --global staredown.githubusername myemail@somewhere.com\n'
-            '$ git config --global staredown.githubpassword <API TOKEN>'
-        )
+        panic(ERR_NO_GH_CREDS)
 
-    gh = github3.login(username, password)
+    if not password and password_command:
+        try:
+            pw = subprocess.run(password_command, shell=True, check=True, stdout=subprocess.PIPE)
+        except subprocess.CalledProcessError:
+            panic('Did not receive GitHub password from `githubpasswordcmd`!')
+
+        gh = github3.login(username, pw.stdout.strip())
+    else:
+        gh = github3.login(username, password)
 
     github_remotes = extract_github_remotes(repo)
 
@@ -158,13 +192,14 @@ def main():
         for pull in gh_repo.iter_pulls(state='all'):
             # Sometimes commit IDs change when getting pulled into the repo,
             # so we need to scan for the PR's resulting commit sha as well
-            shas = {x.sha for x in pull.iter_commits()} | {pull.merge_commit_sha}
+            shas = {x.sha for x in pull.iter_commits()}
+            shas.add(pull.merge_commit_sha)
 
-            if shas.intersection(commit_ids):
-                print(format_discovered_pr(
-                    pull, args.quiet,
-                    prefix=gh_remote if len(github_remotes) > 1 else None,
-                ))
+            found_shas = shas.intersection(commit_ids)
+
+            if found_shas:
+                for line in format_discovered_pr(gh_remote, found_shas, pull, args):
+                    print(line)
 
 
 if __name__ == '__main__':
