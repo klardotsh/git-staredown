@@ -1,5 +1,13 @@
 .PHONY: install requirements
-DESTDIR ?= /usr/local
+
+detected_OS := $(shell sh -c 'uname -s 2>/dev/null || echo not')
+
+ifeq ($(detected_OS),Darwin)
+	DESTDIR ?= /usr/local
+else
+	DESTDIR ?= /usr
+endif
+
 INSTALLED_DESTDIR ?= ${DESTDIR}
 
 git-staredown.system.py: git-staredown.py
