@@ -33,6 +33,13 @@ Arch Linux users can install
 [git-staredown-git](https://aur.archlinux.org/packages/git-staredown-git) from
 the AUR.
 
+MacOS instructions until I find a better way:
+
+```sh
+brew install libgit2
+sudo make requirements install
+```
+
 ## Configuration
 
 `git-staredown` integrates with Git's [built-in configuration
