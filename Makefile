@@ -1,8 +1,9 @@
 .PHONY: install requirements
 DESTDIR ?= /usr/local
+INSTALLED_DESTDIR ?= ${DESTDIR}
 
 git-staredown.system.py: git-staredown.py
-	sed -e 's#/usr/bin/env #${DESTDIR}/bin/#' $< > $@
+	sed -e 's#/usr/bin/env #${INSTALLED_DESTDIR}/bin/#' $< > $@
 
 install: git-staredown.system.py
 	mkdir -p ${DESTDIR}/bin
