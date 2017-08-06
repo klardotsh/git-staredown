@@ -1,0 +1,10 @@
+[package]
+name = "git-staredown"
+version = "0.1.0"
+authors = ["Josh Klar <j@iv597.com>"]
+
+[dependencies]
+github-rs = "0.5"
+git2 = "0.6"
+clap = "2.26"
+subprocess = "0.1.11"
